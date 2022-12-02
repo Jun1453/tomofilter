@@ -3,6 +3,8 @@
 # resampled models. The .out files of HMSL-P06 and HMSL-S06 are ready on Zenodo (doi:10.5281/zenodo.6474359).
 
 import numpy as np
+import pandas as pd
+
 class ResolutionOperator():
     def __init__(self, filename):
         data = np.fromfile(filename, dtype='i4')
@@ -10,24 +12,44 @@ class ResolutionOperator():
         del data
         self.matrix = np.fromfile(filename, dtype=np.float64)[1:].reshape(M, N, order='F')
 
-    def filter(self, model):
-        mt = np.load(f"{model}.npy")
-        return self.matrix @ mt[0:self.matrix.shape[0]]
+class Model():
+    def __init__(self, name, suffix=""):
+        np.random.seed(int(id(self))%2**16)
+        if "HMSL" in name:
+            self.values = self._getanomalies(f"/Users/jun/mantletomo/legacy/ref{name[5]}Tomo.csv")
+        else:
+            self.values = np.load(f"{name}.mapped{suffix}.npy")
+        self.filteredby = []
+        self.modelname = name
+    def __str__(self):
+        return self.modelname
+    def _getanomalies(self, filepath):
+        table = pd.read_csv(filepath)
+        return table['anomaly'].values
+    def filter(self, filter: ResolutionOperator):
+        self.values = filter.matrix @ self.values[0:filter.matrix.shape[0]]
+        self.filteredby.append(filter)
+        return self
         
 Rp = ResolutionOperator('./Res_P/R6000.out') # revised R for VP
 Rs = ResolutionOperator('./Res_S/R6000.out') # revised R for VS
 
-# Filtering Synthetic models
+##
+# Filtering synthetic models
+##
 
-P_models = ['T1_dlnVp', 'T1-pPv_dlnVp', 'TC1_dlnVp', 'TC1-pPv_dlnVp', 'TC4_dlnVp', 'TC4-pPv_dlnVp']
-S_models = ['T1_dlnVs', 'T1-pPv_dlnVs', 'TC1_dlnVs', 'TC1-pPv_dlnVs', 'TC4_dlnVs', 'TC4-pPv_dlnVs']
-
-for model in P_models: 
-    np.save(f"{model}.dag", Rp.filter(f"{model}.mapped"))
+S_models = list(map(Model, ['T1_dlnVs', 'T1-pPv_dlnVs', 'TC1_dlnVs', 'TC1-pPv_dlnVs', 'TC4_dlnVs', 'TC4-pPv_dlnVs']))
+P_models = list(map(Model, ['T1_dlnVp', 'T1-pPv_dlnVp', 'TC1_dlnVp', 'TC1-pPv_dlnVp', 'TC4_dlnVp', 'TC4-pPv_dlnVp']))
 
 for model in S_models: 
-    np.save(f"{model}.dag", Rs.filter(f"{model}.mapped"))
+    np.save(f"{model}.dag", model.filter(Rs).values)
 
-# Cross-filtering
-Stomo_model = "refStomo"
-np.save(f"RpVs.dag", Rp.filter(Stomo_model))
+for model in P_models: 
+    np.save(f"{model}.dag", model.filter(Rp).values)
+
+##
+# Filtering HMSL models
+##
+
+np.save(f"StoP.dag", Model("HMSL-S06").filter(Rp).values)
+np.save(f"PtoS.dag", Model("HMSL-P06").filter(Rs).values)
